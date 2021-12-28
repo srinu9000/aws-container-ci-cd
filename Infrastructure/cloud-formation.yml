@@ -1,0 +1,318 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  ApplicationName:
+    Description: Application name for the stack to decide which application to deploy.
+    Type: String
+    Default: clove-sharky
+    AllowedValues:
+      - clove-sharky
+  EnvType:
+    Description: This parameter is added into the names of resources to distinguish the environment type
+    Type: String
+    Default: dev
+    AllowedValues:
+      - prd
+      - dev
+  Env:
+    Description: This parameter is added into the names of resources to distinguish the environment name
+    Type: String
+    Default: dev
+  Vpc:
+    Type: String
+    Default: vpc-098704ba0a2f019d8
+  Subnet1:
+    Type: 'AWS::EC2::Subnet::Id'
+    Default: 'subnet-03cd4994940ec7288'
+  Subnet2:
+    Type: 'AWS::EC2::Subnet::Id'
+    Default: 'subnet-0e8f3c6ba992c4551'
+  Subnet3:
+    Type: 'AWS::EC2::Subnet::Id'
+    Default: 'subnet-030bb946ff8e7cb34'
+  APPCPU:
+    Type: String
+    Default: 1024
+  APPMEM:
+    Type: String
+    Default: 2048
+  APPImage:
+    Type: String
+    Default: '279253308466.dkr.ecr.ca-central-1.amazonaws.com/clove_shark:latest'
+    
+Resources:
+  ELBSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: SG for load balancer for LP ECS
+      GroupName: !Sub "${ApplicationName}-lb-sg"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 0
+          ToPort: 8080
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: application_name
+          Value: !Ref ApplicationName
+        - Key: environment
+          Value: !Ref EnvType
+
+          
+  ECSSecurityGroup:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      GroupDescription: SG for clove ECS
+      VpcId: !Ref Vpc
+      GroupName: !Sub "${ApplicationName}-ECS-sg"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          SourceSecurityGroupId: !GetAtt ELBSecurityGroup.GroupId
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !GetAtt ELBSecurityGroup.GroupId
+      Tags:
+        - Key: application_name
+          Value: !Ref ApplicationName
+        - Key: environment
+          Value: !Ref EnvType
+       
+  ECSTaskExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub "${ApplicationName}-ECS-TaskExecution-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+                - cloudformation.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+      Policies:
+        - PolicyName: !Sub "${ApplicationName}-ECS-TaskExecution-Role-Policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'ecr:GetAuthorizationToken'
+                  - 'ecr:BatchCheckLayerAvailability'
+                  - 'ecr:GetDownloadUrlForLayer'
+                  - 'ecr:BatchGetImage'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+        - PolicyName: kmsDecrypt
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - kms:Decrypt
+                Resource: '*'
+        - PolicyName: exec
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:CreateControlChannel
+                Resource: '*'
+      Tags:
+        - Key: application_name
+          Value: !Ref ApplicationName
+        - Key: environment
+          Value: !Ref EnvType
+
+  ECSTaskRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: !Sub "${ApplicationName}-ECS-Task-Role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+                - ecs.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AWSCodePipelineApproverAccess
+      Policies:
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: 
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:CreateControlChannel
+                Resource: '*'
+      Tags:
+        - Key: application_name
+          Value: !Ref ApplicationName
+        - Key: environment
+          Value: !Ref EnvType
+
+  cloveELB:
+    Type: 'AWS::ElasticLoadBalancingV2::LoadBalancer'
+    Properties:
+      Name: !Sub "${ApplicationName}-lb"
+      SecurityGroups:
+        - !GetAtt ELBSecurityGroup.GroupId
+      Type: application
+      Subnets:
+        - !Ref Subnet1
+        - !Ref Subnet2
+      Scheme: internet-facing
+
+      
+  cloveTG:
+    Type: 'AWS::ElasticLoadBalancingV2::TargetGroup'
+    Properties:
+      HealthCheckEnabled: true
+      HealthCheckIntervalSeconds: 30
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 5
+      TargetType: ip
+      Name: !Sub "${ApplicationName}-tg"
+      Port: 80
+      Protocol: HTTP
+      UnhealthyThresholdCount: 2
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: application_name
+          Value: !Ref ApplicationName
+        - Key: environment
+          Value: !Ref EnvType
+          
+  cloveListener:
+    Type: 'AWS::ElasticLoadBalancingV2::Listener'
+    Properties:
+      DefaultActions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref cloveTG
+      LoadBalancerArn: !Ref cloveELB
+      Port: 8080
+      Protocol: HTTP
+  
+  
+  cloveLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: !Sub "/ecs/${ApplicationName}"
+      RetentionInDays: 60
+
+  cloveTaskDefinition:
+    Type: 'AWS::ECS::TaskDefinition'
+    Properties:
+      ContainerDefinitions:
+        - Essential: true
+          Image: 279253308466.dkr.ecr.ca-central-1.amazonaws.com/clove_shark:latest
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub "/ecs/${ApplicationName}"
+              awslogs-region: ca-central-1
+              awslogs-stream-prefix: ecs
+          Name: !Sub ${ApplicationName}
+          Environment:
+            - Name: ENVIRONMENT
+              Value: !Ref EnvType
+          PortMappings:
+            - ContainerPort: 8080
+              HostPort: 8080
+              Protocol: tcp
+
+      Cpu: !Ref APPCPU
+      Memory: !Ref APPMEM
+      ExecutionRoleArn: !Ref ECSTaskExecutionRole
+      TaskRoleArn: !Ref ECSTaskRole
+      Family: !Sub "clove"
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+
+  ECSCluster:
+    Type: 'AWS::ECS::Cluster'
+    Properties:
+      ClusterName: !Sub "${ApplicationName}-Cluster"
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  cloveService:
+    Type: 'AWS::ECS::Service'
+    DependsOn: 
+      - cloveListener
+    Properties:
+      Cluster: !Ref ECSCluster
+      DesiredCount: 1
+      HealthCheckGracePeriodSeconds: 3600
+      LaunchType: FARGATE
+      LoadBalancers:
+        - ContainerName: !Sub "${ApplicationName}"
+          ContainerPort: 8080
+          TargetGroupArn: !Ref cloveTG
+      EnableExecuteCommand: true
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !GetAtt ECSSecurityGroup.GroupId
+          Subnets:
+            - !Ref Subnet1
+            - !Ref Subnet2
+      PlatformVersion: 1.4.0
+      ServiceName: !Sub "${ApplicationName}-service"
+      TaskDefinition: !Ref cloveTaskDefinition
+          
+  cloveCloudWatchAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      ActionsEnabled: true
+      AlarmDescription: Alarm for LP TG
+      AlarmName: !Sub "${ApplicationName}-web"
+      ComparisonOperator: LessThanThreshold
+      Dimensions:
+        - Name: LoadBalancer
+          Value: !GetAtt cloveELB.LoadBalancerFullName
+        - Name: TargetGroup
+          Value: !GetAtt cloveTG.TargetGroupFullName
+      EvaluationPeriods: 1
+      MetricName: HealthyHostCount
+      Namespace: AWS/ApplicationELB
+      Period: 60
+      Statistic: Minimum
+      Threshold: 1
+      TreatMissingData: breaching
+      
+      
+Outputs:
+  clove:
+    Description: The DNSName of the clove load balancer
+    Value: !GetAtt cloveELB.DNSName    
+    

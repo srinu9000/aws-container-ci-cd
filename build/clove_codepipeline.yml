@@ -1,0 +1,331 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Create a Build to include CloudFormation Features, CodeBuild and Approval steps.
+
+Parameters:
+  ApplicationRepoName:
+    Type: String
+    Description: Name of the repo which contains CFN template.
+    Default: clove
+  ApplicationRepositoryArn: 
+    Description: CodeCommit repository arn 
+    Default: arn:aws:codecommit:ca-central-1:279253308466:clove
+    Type: String 
+  ArtifactStoreS3Location:
+    Type: String
+    Description: Name of the S3 bucket to store CodePipeline artificat.
+    Default: codepipeline-workspace-4290
+  CodeBuildProjectName: 
+    Description: CodeBuild Project name 
+    Type: String
+    Default: clove-shark-codebuild
+  ECRName: 
+    Description: ECR Name
+    Type: String
+    Default: clove_shark
+  ECRTag:
+    Description: Always Latest
+    Type: String
+    Default: latest
+  ECRURI:
+    Description: ECR Image URI
+    Type: String
+    Default: 279253308466.dkr.ecr.ca-central-1.amazonaws.com
+  CodePipelineSharedWorkspaceKMSKeyArn: 
+    Description: Encryption key for codepipeline shared workspace S3 bucket 
+    Default: arn:aws:kms:ca-central-1:279253308466:key/cb275f62-2f6a-436b-80e2-c7ebd612a22a
+    Type: String
+  CodePipelineProjectName: 
+    Description: Overall project code to use for naming 
+    Default: clove
+    Type: String
+
+
+Resources:
+  CodeBuildServiceRole: 
+    Type: AWS::IAM::Role 
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17 
+        Statement: 
+          - Effect: Allow 
+            Principal: 
+              Service:  
+                - 'codebuild.amazonaws.com' 
+            Action: 
+              - 'sts:AssumeRole' 
+      RoleName: !Sub "AWSCodeBuildServiceRole-${AWS::Region}-${CodeBuildProjectName}" 
+      Path: / 
+      Policies: 
+        - PolicyName: !Sub "AWS-CodeBuild-Service-${CodeBuildProjectName}" 
+          PolicyDocument: 
+            Version: 2012-10-17 
+            Statement: 
+              - Effect: Allow 
+                Action: 
+                  - 'ecr:*' 
+                Resource: '*' 
+              - Effect: Allow 
+                Action: 
+                  - 's3:*'
+                Resource: 
+                  - !Sub 'arn:aws:s3:::artifact-repository-${AWS::AccountId}*' 
+                  - !Sub 'arn:aws:s3:::codepipeline-workspace-4290*' 
+                  - 'arn:aws:s3:::devopsc4e-central-pipeline-workspace*' 
+                  - 'arn:aws:s3:::central-artifact-bucket*' 
+                  - 'arn:aws:s3:::lifeapps-build-repository*'                   
+                  - Fn::Sub: arn:aws:s3:::codepipeline-${AWS::Region}-*
+                  - Fn::Sub: arn:aws:s3:::${ArtifactStoreS3Location}/*
+                  - Fn::Sub: arn:aws:s3:::${ArtifactStoreS3Location}
+              - Effect: Allow 
+                Action:  
+                  - 'codebuild:CreateReport*' 
+                  - 'codebuild:UpdateReport' 
+                  - 'codebuild:BatchPutCodeCoverages' 
+                  - 'codebuild:BatchPutTestCases' 
+                Resource: !Join [ ':', ['arn:aws:codebuild', !Ref 'AWS::Region', !Ref 'AWS::AccountId', 'report-group/*' ] ] 
+              - Effect: Allow 
+                Action: 
+                  - 'codebuild:*' 
+                Resource: "arn:aws:codebuild:ca-central-1:*:*" 
+              - Effect: Allow 
+                Action: 
+                  - 'cloudformation:DescribeStack*' 
+                Resource:  
+                  - !Sub 'arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/*' 
+              - Effect: Allow 
+                Action: 
+                  - 'logs:CreateLog*' 
+                  - 'logs:PutLogEvents' 
+                Resource: 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*' 
+              - Effect: Allow 
+                Action: 
+                  - 'codecommit:GitPull' 
+                Resource: '*'
+  CodePipelineServiceRole:
+    Type: 'AWS::IAM::Role' 
+    Properties: 
+      AssumeRolePolicyDocument: 
+        Version: 2012-10-17 
+        Statement: 
+          - Effect: Allow 
+            Principal: 
+              Service: 
+                - codepipeline.amazonaws.com 
+            Action:  
+              - 'sts:AssumeRole' 
+      Path: / 
+      Policies: 
+        - PolicyName: !Sub 'AWS-CodePipeline-Service-${CodePipelineProjectName}'  
+          PolicyDocument: 
+            Version: 2012-10-17 
+            Statement: 
+              - Effect: Allow 
+                Action:  
+                  - 'codecommit:CancelUploadArchive' 
+                  - 'codecommit:GetBranch' 
+                  - 'codecommit:GetCommit' 
+                  - 'codecommit:GetRepository' 
+                  - 'codecommit:GetUploadArchiveStatus' 
+                  - 'codecommit:UploadArchive' 
+                Resource: '*'
+              - Effect: Allow 
+                Action: 
+                  - 'cloudwatch:*' 
+                  - 'sns:*' 
+                Resource: '*' 
+              - Effect: Allow 
+                Action: 
+                  - 'codecommit:GitPull' 
+                  - 'logs:CreateLogGroup' 
+                  - 'logs:CreateLogStream' 
+                  - 'logs:PutLogEvents' 
+                  - 'codebuild:CreateReportGroup' 
+                  - 'codebuild:CreateReport' 
+                  - 'codebuild:StartBuild' 
+                  - 'codebuild:BatchGetBuilds' 
+                  - 'codebuild:UpdateReport' 
+                  - 'codebuild:BatchPutCodeCoverages' 
+                  - 'codebuild:BatchPutTestCases' 
+                  - 's3:*'                   
+                Resource: 
+                  - !Sub 'arn:aws:s3:::artifact-repository-${AWS::AccountId}*' 
+                  - !Sub 'arn:aws:s3:::codepipeline-workspace-4290*' 
+                  - !Ref ApplicationRepositoryArn
+                  - !GetAtt BuildRestAppCFNProject.Arn
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${CodeBuildProjectName}' 
+                  - !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${CodeBuildProjectName}/*' 
+              - Effect: Allow 
+                Action: 
+                  - 'sts:AssumeRole' 
+                Resource: 
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+              - Effect: Allow 
+                Action: 
+                  - 'cloudformation:*'
+                Resource: '*' 
+              - Effect: Allow 
+                Action: 
+                  - 'iam:GetRole'
+                  - 'iam:PassRole'
+                Resource:
+                  - !Sub 'arn:aws:iam::${AWS::AccountId}:role/*'
+  CloudFormationRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub CloudFormationRole-${AWS::StackName}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "cloudformation.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: "CloudFormationVPCAccessPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - "s3:GetObject"
+                  - "s3:ListBucket"
+                Resource:
+                  - Fn::Sub: arn:aws:s3:::${ArtifactStoreS3Location}
+                  - Fn::Sub: arn:aws:s3:::${ArtifactStoreS3Location}/*
+              - Effect: Allow 
+                Action: 
+                  - "cloudformation:*" 
+                Resource: 
+                  - "*"
+              - Effect: Allow 
+                Action: 
+                  - 'ec2:*'
+                  - 'iam:*'
+                Resource: 
+                  - '*'
+              - Effect: Allow 
+                Action: 
+                  - 'elasticloadbalancing:*'
+                Resource: 
+                  - '*'
+              - Effect: Allow 
+                Action: 
+                  - 'logs:*'
+                Resource: 
+                  - '*'
+              - Effect: Allow 
+                Action: 
+                  - 'ecs:*'
+                Resource: 
+                  - '*'
+              - Effect: Allow 
+                Action: 
+                  - 'cloudwatch:*'
+                Resource: 
+                  - '*'
+                  
+  BuildRestAppCFNProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub BuildcloveAppCFN-${AWS::StackName}
+      Description: Build a docker image & push it to ECR
+      ServiceRole: !Ref CodeBuildServiceRole
+      Artifacts:
+        Type: S3
+        Location: !Ref ArtifactStoreS3Location
+        Name: !Sub BuildcolveAppCFN-${AWS::StackName}
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:3.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: IMAGE_REPO_NAME
+            Type: PLAINTEXT
+            Value: !Ref 'ECRName'
+          - Name: IMAGE_TAG
+            Type: PLAINTEXT
+            Value: !Ref 'ECRTag'
+          - Name: REPOSITORY_URI
+            Type: PLAINTEXT
+            Value: !Ref 'ECRURI'
+      Source:
+        Location:
+          Fn::Join:
+            - ""
+            - - "https://git-codecommit."
+              - "ca-central-1"
+              - ".amazonaws.com/v1/repos/"
+              - "clove"
+        Type: CODECOMMIT
+      TimeoutInMinutes: 15
+      Tags:
+        - Key: Name
+          Value: !Sub BuildRestAppCFN-${AWS::StackName}
+
+  CodePipelineProject:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore: 
+        # central shared workspace S3 bucket 
+        Location: !Ref ArtifactStoreS3Location
+        Type: S3 
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      Name: !Ref CodePipelineProjectName 
+      RestartExecutionOnUpdate: true 
+      Stages: 
+        - Name: Source 
+          Actions:  
+            - Name: Source 
+              ActionTypeId: 
+                Category: Source 
+                Owner: AWS 
+                Provider: CodeCommit 
+                Version: '1' 
+              Configuration: 
+                RepositoryName: !Ref ApplicationRepoName 
+                BranchName: 'master'
+                PollForSourceChanges: false 
+              OutputArtifacts:  
+                - Name: SourceArtifact 
+              Namespace: SourceVariables 
+              RunOrder: 1 
+        - Name: Build
+          Actions: 
+            - Name: Build 
+              ActionTypeId: 
+                Category: Build 
+                Owner: AWS 
+                Provider: CodeBuild 
+                Version: '1' 
+              Configuration: 
+                ProjectName: !Ref BuildRestAppCFNProject 
+              InputArtifacts: 
+                - Name: SourceArtifact 
+              OutputArtifacts: 
+                - Name: BuildArtifact 
+              Namespace: BuildVariables 
+              RunOrder: 1
+        - Name: DeployToDevelop
+          Actions:
+            - Name: CreateDevCFNStack
+              InputArtifacts:
+                - Name: SourceArtifact
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: CloudFormation
+              OutputArtifacts:
+                - Name: CreatedDevCFNStack
+              Configuration:
+                ActionMode: CREATE_UPDATE
+                RoleArn: !GetAtt CloudFormationRole.Arn
+                Capabilities: CAPABILITY_NAMED_IAM
+                StackName: !Sub Dev-${AWS::StackName}
+                TemplatePath: SourceArtifact::Infrastructure/cloud-formation.yml
+              RunOrder: 1
