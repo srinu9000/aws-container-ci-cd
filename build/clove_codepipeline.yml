@@ -8,7 +8,6 @@ Parameters:
     Default: clove
   ApplicationRepositoryArn: 
     Description: CodeCommit repository arn 
-    Default: arn:aws:codecommit:ca-central-1:279253308466:clove
     Type: String 
   ArtifactStoreS3Location:
     Type: String
@@ -29,7 +28,6 @@ Parameters:
   ECRURI:
     Description: ECR Image URI
     Type: String
-    Default: 279253308466.dkr.ecr.ca-central-1.amazonaws.com
   CodePipelineSharedWorkspaceKMSKeyArn: 
     Description: Encryption key for codepipeline shared workspace S3 bucket 
     Default: arn:aws:kms:ca-central-1:279253308466:key/cb275f62-2f6a-436b-80e2-c7ebd612a22a

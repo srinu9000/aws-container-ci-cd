@@ -19,16 +19,12 @@ Parameters:
     Default: dev
   Vpc:
     Type: String
-    Default: vpc-098704ba0a2f019d8
   Subnet1:
     Type: 'AWS::EC2::Subnet::Id'
-    Default: 'subnet-03cd4994940ec7288'
   Subnet2:
     Type: 'AWS::EC2::Subnet::Id'
-    Default: 'subnet-0e8f3c6ba992c4551'
   Subnet3:
     Type: 'AWS::EC2::Subnet::Id'
-    Default: 'subnet-030bb946ff8e7cb34'
   APPCPU:
     Type: String
     Default: 1024
@@ -37,7 +33,6 @@ Parameters:
     Default: 2048
   APPImage:
     Type: String
-    Default: '279253308466.dkr.ecr.ca-central-1.amazonaws.com/clove_shark:latest'
     
 Resources:
   ELBSecurityGroup:

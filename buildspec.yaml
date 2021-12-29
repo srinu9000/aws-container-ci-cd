@@ -11,7 +11,7 @@ phases:
     - echo Logging in to Amazon ECR.... 
     - aws --version
     # update the following line with your own region
-    - aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin 279253308466.dkr.ecr.ca-central-1.amazonaws.com
+    - aws ecr get-login-password --region ca-central-1 | docker login --username AWS --password-stdin ${ACCOUNTID}.dkr.ecr.ca-central-1.amazonaws.com
   build: 
     commands: 
     - echo Build started on `date` 
